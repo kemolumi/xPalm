@@ -2,7 +2,6 @@ use tokio::net::UdpSocket;
 use std::{ io, net::{ IpAddr, Ipv4Addr, SocketAddr } };
 
 pub async fn start(
-    host_target: SocketAddr,
     host_addr: IpAddr,
     host_v4: Ipv4Addr,
     hostname: String
@@ -11,7 +10,9 @@ pub async fn start(
     let multicast_addr = IpAddr::V4(multicast_v4);
     let multicast_target = SocketAddr::new(multicast_addr, 45783);
 
-    let sock = UdpSocket::bind(host_target).await?;
+    let sock = UdpSocket::bind(
+        SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 45783)
+    ).await?;
     sock.join_multicast_v4(multicast_v4, host_v4).unwrap();
 
     let mut message = hostname.as_bytes().to_owned();
