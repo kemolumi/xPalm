@@ -3,10 +3,12 @@ use std::time::Duration;
 use evdev::{
     AbsInfo,
     AbsoluteAxisCode,
+    AbsoluteAxisEvent,
     AttributeSet,
     BusType,
     EventSummary,
     FFEffectCode,
+    FFEffectKind,
     InputEvent,
     InputId,
     KeyCode,
@@ -14,9 +16,11 @@ use evdev::{
     UinputAbsSetup,
     uinput::VirtualDevice,
 };
+use strum::FromRepr;
 use tokio::sync::mpsc;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, FromRepr)]
+#[repr(u8)]
 pub enum ControllerButton {
     A,
     B,
@@ -24,8 +28,10 @@ pub enum ControllerButton {
     X,
     LB,
     RB,
-    Back,
+    BL,
+    BR,
     Start,
+    Back,
     Guide,
 }
 
@@ -34,13 +40,65 @@ impl ControllerButton {
         match self {
             Self::A => KeyCode::BTN_SOUTH,
             Self::B => KeyCode::BTN_EAST,
-            Self::Y => KeyCode::BTN_NORTH,
-            Self::X => KeyCode::BTN_WEST,
+            Self::Y => KeyCode::BTN_WEST,
+            Self::X => KeyCode::BTN_NORTH,
             Self::LB => KeyCode::BTN_TL,
             Self::RB => KeyCode::BTN_TR,
-            Self::Back => KeyCode::BTN_SELECT,
+            Self::BL => KeyCode::BTN_THUMBL,
+            Self::BR => KeyCode::BTN_THUMBR,
             Self::Start => KeyCode::BTN_START,
+            Self::Back => KeyCode::BTN_SELECT,
             Self::Guide => KeyCode::BTN_MODE,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, FromRepr)]
+#[repr(u8)]
+pub enum ControllerTrigger {
+    Left,
+    Right,
+}
+
+impl ControllerTrigger {
+    pub fn key_code(self) -> AbsoluteAxisCode {
+        match self {
+            Self::Left => AbsoluteAxisCode::ABS_Z,
+            Self::Right => AbsoluteAxisCode::ABS_RZ,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, FromRepr)]
+#[repr(u8)]
+pub enum ControllerDpad {
+    UpDown,
+    LeftRight,
+}
+
+impl ControllerDpad {
+    pub fn key_code(self) -> AbsoluteAxisCode {
+        match self {
+            Self::UpDown => AbsoluteAxisCode::ABS_HAT0Y,
+            Self::LeftRight => AbsoluteAxisCode::ABS_HAT0X,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, FromRepr)]
+#[repr(u8)]
+pub enum ControllerJoystick {
+    Left,
+    Right,
+}
+
+impl ControllerJoystick {
+    pub fn key_code(self) -> (AbsoluteAxisCode, AbsoluteAxisCode) {
+        match self {
+            Self::Left =>
+                (AbsoluteAxisCode::ABS_X, AbsoluteAxisCode::ABS_Y),
+            Self::Right =>
+                (AbsoluteAxisCode::ABS_RX, AbsoluteAxisCode::ABS_RY),
         }
     }
 }
@@ -50,7 +108,10 @@ pub struct Controller {
 }
 
 impl Controller {
-    pub fn new(polling_rate: Duration) -> Result<Self, std::io::Error> {
+    pub fn new(
+        polling_rate: Duration,
+        vibration_tx: mpsc::Sender<(u8, u16)>
+    ) -> Result<Self, std::io::Error> {
         let abs_setup = AbsInfo::new(0, -32768, 32767, 16, 128, 0);
         let abs_x = UinputAbsSetup::new(AbsoluteAxisCode::ABS_X, abs_setup);
         let abs_y = UinputAbsSetup::new(AbsoluteAxisCode::ABS_Y, abs_setup);
@@ -58,9 +119,12 @@ impl Controller {
         let abs_ry = UinputAbsSetup::new(AbsoluteAxisCode::ABS_RY, abs_setup);
 
         let trigger_setup = AbsInfo::new(0, 0, 255, 0, 0, 0);
-        let abs_z = UinputAbsSetup::new(AbsoluteAxisCode::ABS_Z, trigger_setup);
+        let abs_z = UinputAbsSetup::new(
+            ControllerTrigger::Left.key_code(),
+            trigger_setup
+        );
         let abs_rz = UinputAbsSetup::new(
-            AbsoluteAxisCode::ABS_RZ,
+            ControllerTrigger::Right.key_code(),
             trigger_setup
         );
 
@@ -81,21 +145,16 @@ impl Controller {
         keys.insert(ControllerButton::X.key_code());
         keys.insert(ControllerButton::LB.key_code());
         keys.insert(ControllerButton::RB.key_code());
+        keys.insert(ControllerButton::BL.key_code());
+        keys.insert(ControllerButton::BR.key_code());
         keys.insert(ControllerButton::Back.key_code());
         keys.insert(ControllerButton::Start.key_code());
         keys.insert(ControllerButton::Guide.key_code());
 
-        // Impossible to use on a phone, added to make the controller
-        // a bit genuine.
-        keys.insert(KeyCode::BTN_THUMBL);
-        keys.insert(KeyCode::BTN_THUMBR);
-
         let mut ff_effects = AttributeSet::<FFEffectCode>::new();
         ff_effects.insert(FFEffectCode::FF_RUMBLE);
-        ff_effects.insert(FFEffectCode::FF_PERIODIC);
-        ff_effects.insert(FFEffectCode::FF_CONSTANT);
 
-        let mut device = VirtualDevice::builder()?
+        let device = VirtualDevice::builder()?
             .input_id(InputId::new(BusType::BUS_USB, 0x045e, 0x028e, 0x0114))
             .name("XPalm Controller")
             .with_absolute_axis(&abs_x)?
@@ -112,15 +171,15 @@ impl Controller {
             .build()
             .unwrap();
 
-        println!(
-            "Mounted as {}",
-            device.get_syspath().unwrap().as_os_str().to_str().unwrap()
-        );
-
         let (button_batch_tx, button_batch_rx) = mpsc::channel(2048);
 
         tokio::spawn(
-            Controller::event_loop(button_batch_rx, polling_rate, device)
+            Controller::event_loop(
+                button_batch_rx,
+                vibration_tx,
+                polling_rate,
+                device
+            )
         );
 
         Ok(Controller { button_batch_tx })
@@ -128,6 +187,7 @@ impl Controller {
 
     async fn event_loop(
         mut button_batch_rx: mpsc::Receiver<InputEvent>,
+        vibration_tx: mpsc::Sender<(u8, u16)>,
         polling_rate: Duration,
         device: VirtualDevice
     ) {
@@ -135,6 +195,8 @@ impl Controller {
         let mut interval = tokio::time::interval(polling_rate);
 
         loop {
+            let mut vibration = None;
+
             tokio::select! {
                 event = stream.next_event() => {
                     let ev = event.unwrap();
@@ -147,6 +209,16 @@ impl Controller {
                                         .process_ff_upload(uinput_event)
                                         .unwrap();
                                     upload.set_retval(0);
+
+                                    let effect = upload.effect();
+
+                                    match effect.kind {
+                                        FFEffectKind::Rumble { strong_magnitude, weak_magnitude } => {
+                                            let average = (strong_magnitude as f32 + weak_magnitude as f32) / 2.0;
+                                            vibration = Some(((average / 65535.0 * 255.0) as u8, effect.replay.length / 5));
+                                        }
+                                        _ => {}
+                                    }
                                 }
                                 evdev::UInputCode::UI_FF_ERASE => {
                                     let mut erase = stream
@@ -158,15 +230,24 @@ impl Controller {
                                 _ => {}
                             }
                         }
-                        other => {
-                            println!("{:?}", other);
-                        }
+                        _ => {}
                     }
                     interval.tick().await;
                 }
-                _ = async {
-                    interval.tick().await;
-                } => {}
+                _ = interval.tick() => {}
+            }
+
+            if button_batch_rx.is_closed() {
+                break;
+            }
+
+            match vibration {
+                None => {}
+                Some(vibration) => {
+                    if vibration_tx.send(vibration).await.is_err() {
+                        break;
+                    }
+                }
             }
 
             let count = button_batch_rx.len();
@@ -184,15 +265,38 @@ impl Controller {
         }
     }
 
-    pub async fn press(&self, button: ControllerButton) {
+    pub async fn button(&self, button: ControllerButton, state: u8) {
         self.button_batch_tx
-            .send(*KeyEvent::new(button.key_code(), 1)).await
+            .send(*KeyEvent::new(button.key_code(), state as i32)).await
             .unwrap();
     }
 
-    pub async fn release(&self, button: ControllerButton) {
+    pub async fn trigger(&self, trigger: ControllerTrigger, power: u8) {
         self.button_batch_tx
-            .send(*KeyEvent::new(button.key_code(), 0)).await
+            .send(
+                *AbsoluteAxisEvent::new(trigger.key_code(), power as i32)
+            ).await
+            .unwrap();
+    }
+
+    pub async fn dpad(&self, dpad: ControllerDpad, direction: u8) {
+        self.button_batch_tx
+            .send(
+                *AbsoluteAxisEvent::new(dpad.key_code(), direction as i32)
+            ).await
+            .unwrap();
+    }
+
+    pub async fn joystick(&self, joystick: ControllerJoystick, x: i16, y: i16) {
+        self.button_batch_tx
+            .send(
+                *AbsoluteAxisEvent::new(joystick.key_code().0, x as i32)
+            ).await
+            .unwrap();
+        self.button_batch_tx
+            .send(
+                *AbsoluteAxisEvent::new(joystick.key_code().1, y as i32)
+            ).await
             .unwrap();
     }
 }
