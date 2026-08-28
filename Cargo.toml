@@ -10,5 +10,6 @@ inquire = "0.7.5"
 local-ip-address = "0.6.13"
 rand = "0.10.2"
 rdev = { version = "0.5.3", features = ["unstable_grab"] }
+strum = { version = "0.28.0", features = ["derive"] }
 tokio = { version = "1.53.1", features = ["full"] }
 whoami = "2.1.3"
