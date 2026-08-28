@@ -18,7 +18,7 @@ async fn main() {
     let mut announcer_task: Option<
         tokio::task::JoinHandle<Result<(), std::io::Error>>
     > = None;
-    let mut manager_task: Option<
+    let mut instances_task: Option<
         tokio::task::JoinHandle<Result<(), std::io::Error>>
     > = None;
 
@@ -48,12 +48,9 @@ async fn main() {
         if let Some(task) = announcer_task {
             task.abort();
         }
-        if let Some(task) = manager_task {
+        if let Some(task) = instances_task {
             task.abort();
         }
-        // if let Some(task) = joystick_task {
-        //     task.abort();
-        // }
 
         let host_v4 = Ipv4Addr::from_str(&current_ip).unwrap();
         let host_addr = IpAddr::V4(host_v4);
@@ -69,7 +66,7 @@ async fn main() {
         );
 
         let manager_target = SocketAddr::new(host_addr, 45784);
-        manager_task = Some(
+        instances_task = Some(
             tokio::spawn(async move {
                 instance::launch_main(manager_target).await
             })
