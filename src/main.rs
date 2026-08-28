@@ -36,12 +36,6 @@ async fn main() {
             current_ip.bright_cyan(),
             "45784".bright_cyan()
         );
-        println!(
-            "{} Ghost controller | Add: {} | Remove: {}",
-            ">".green(),
-            "F7".bright_cyan(),
-            "F8".bright_cyan()
-        );
 
         if let Some(task) = announcer_task {
             task.abort();
