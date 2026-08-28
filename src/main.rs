@@ -4,7 +4,7 @@ pub mod model;
 
 use std::{ net::{ IpAddr, Ipv4Addr, SocketAddr }, str::FromStr, sync::mpsc };
 use colored::Colorize;
-use services::{ announcer, ghost, local_ip };
+use services::{ announcer, local_ip };
 
 use crate::services::instance;
 
@@ -25,8 +25,6 @@ async fn main() {
     let mut current_ip = ip_receiver.recv().unwrap();
 
     loop {
-        ghost::deaf();
-
         println!(
             "{} Binding instance on IP Address: {}",
             ">".green(),
@@ -71,8 +69,6 @@ async fn main() {
                 instance::launch_main(manager_target).await
             })
         );
-
-        ghost::listen();
 
         current_ip = ip_receiver.recv().unwrap();
     }
