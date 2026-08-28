@@ -1,5 +1,6 @@
 mod services;
 pub mod consts;
+pub mod model;
 
 use std::{ net::{ IpAddr, Ipv4Addr, SocketAddr }, str::FromStr, sync::mpsc };
 use colored::Colorize;
@@ -15,9 +16,6 @@ async fn main() {
     local_ip::fetch(ip_sender);
 
     let mut announcer_task: Option<
-        tokio::task::JoinHandle<Result<(), std::io::Error>>
-    > = None;
-    let mut joystick_task: Option<
         tokio::task::JoinHandle<Result<(), std::io::Error>>
     > = None;
     let mut manager_task: Option<
