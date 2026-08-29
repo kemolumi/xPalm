@@ -44,7 +44,6 @@ pub async fn launch_main(host_target: SocketAddr) -> io::Result<()> {
         }
 
         period.insert(client.1.ip(), tokio::time::Instant::now());
-
         tokio::spawn(client_bootstrap(client));
     }
 }
