@@ -1,6 +1,6 @@
 [package]
 name = "xpalm"
-version = "1.0.0-fur"
+version = "1.0.0-snack"
 edition = "2024"
 
 [dependencies]

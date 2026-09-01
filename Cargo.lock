@@ -1091,7 +1091,7 @@ dependencies = [
 
 [[package]]
 name = "xpalm"
-version = "1.0.0-fur"
+version = "1.0.0-snack"
 dependencies = [
  "clap",
  "colored",
