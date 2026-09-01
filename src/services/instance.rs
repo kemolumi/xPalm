@@ -4,20 +4,14 @@ use tokio::{
     net::{ TcpListener, TcpStream, tcp::{ OwnedReadHalf, OwnedWriteHalf } },
     sync::{ Mutex, mpsc },
 };
-use std::{
-    collections::HashMap,
-    io,
-    net::{ IpAddr, SocketAddr },
-    sync::Arc,
-    time::Duration,
-};
+use std::{ collections::HashMap, io, net::{ IpAddr, SocketAddr }, sync::Arc };
 
-use crate::{
-    consts::{ CODE_PERIOD, CONNECT_COOLDOWN, POLLING_RATE },
-    model::x360,
-};
+use crate::{ ServerArgs, model::x360 };
 
-pub async fn launch_main(host_target: SocketAddr) -> io::Result<()> {
+pub async fn launch(
+    host_target: SocketAddr,
+    server_args: ServerArgs
+) -> io::Result<()> {
     let sock = TcpListener::bind(host_target).await.unwrap();
 
     let mut period: HashMap<IpAddr, tokio::time::Instant> = HashMap::new();
@@ -28,7 +22,7 @@ pub async fn launch_main(host_target: SocketAddr) -> io::Result<()> {
 
         match period.get(&client.1.ip()) {
             Some(last_join) => {
-                match last_join.elapsed() > CONNECT_COOLDOWN {
+                match last_join.elapsed() > server_args.connect_cooldown {
                     true => {}
                     false => {
                         println!(
@@ -50,11 +44,14 @@ pub async fn launch_main(host_target: SocketAddr) -> io::Result<()> {
         }
 
         period.insert(client.1.ip(), tokio::time::Instant::now());
-        tokio::spawn(client_bootstrap(client));
+        tokio::spawn(client_bootstrap(client, server_args));
     }
 }
 
-async fn client_bootstrap((mut stream, addr): (TcpStream, SocketAddr)) {
+async fn client_bootstrap(
+    (mut stream, addr): (TcpStream, SocketAddr),
+    server_args: ServerArgs
+) {
     let code: u16 = rand::random_range(1454..=9999);
     println!(
         "{} {} authorize code: {}",
@@ -63,7 +60,7 @@ async fn client_bootstrap((mut stream, addr): (TcpStream, SocketAddr)) {
         code.to_string().red().bold()
     );
 
-    match authorize_client(addr.ip(), &mut stream, code).await {
+    match authorize_client(addr.ip(), &mut stream, code, server_args).await {
         Ok(_) => {
             println!(
                 "{} {} was authorized successfully.",
@@ -81,17 +78,18 @@ async fn client_bootstrap((mut stream, addr): (TcpStream, SocketAddr)) {
         }
     }
 
-    client_controller(addr.ip(), stream).await;
+    client_controller(addr.ip(), stream, server_args).await;
 }
 
 async fn authorize_client(
     ip: IpAddr,
     stream: &mut TcpStream,
-    code: u16
+    code: u16,
+    server_args: ServerArgs
 ) -> Result<(), ()> {
     let mut status = Ok(());
     tokio::select! {
-        _ = tokio::time::sleep(CODE_PERIOD) => {
+        _ = tokio::time::sleep(server_args.authorization_period) => {
             println!(
                 "{} {} took too long to enter the code.",
                 ">".red(),
@@ -147,11 +145,17 @@ async fn authorize_client(
     status
 }
 
-async fn client_controller(ip: IpAddr, stream: TcpStream) {
+async fn client_controller(
+    ip: IpAddr,
+    stream: TcpStream,
+    server_args: ServerArgs
+) {
     let (reader, writer) = stream.into_split();
     let (vibrating_tx, vibration_tx) = mpsc::channel(1);
 
-    let controller = match x360::Controller::new(POLLING_RATE, vibrating_tx) {
+    let controller = match
+        x360::Controller::new(server_args.polling_rate, vibrating_tx)
+    {
         Ok(controller) => controller,
         Err(_) => {
             println!(
@@ -170,7 +174,7 @@ async fn client_controller(ip: IpAddr, stream: TcpStream) {
     tokio::select! {
         _ = vibration_handler(vibration_tx, writer.clone()) => {}
         _ = controller_buttons_handler(reader, writer, controller.clone(), switch_tx) => {}
-        _ = a_fucking_deadman_switch_why_not(switch_rx) => {}
+        _ = a_fucking_deadman_switch_why_not(switch_rx, server_args) => {}
     }
 
     println!("{} {} disconnected.", ">".red(), ip.to_string().bright_cyan());
@@ -291,10 +295,13 @@ async fn controller_buttons_handler(
     }
 }
 
-async fn a_fucking_deadman_switch_why_not(mut switch_rx: mpsc::Receiver<()>) {
+async fn a_fucking_deadman_switch_why_not(
+    mut switch_rx: mpsc::Receiver<()>,
+    server_args: ServerArgs
+) {
     loop {
         tokio::select! {
-            _ = tokio::time::sleep(Duration::from_secs(5)) => {
+            _ = tokio::time::sleep(server_args.idle_kick) => {
                 break;
             }
             _ = switch_rx.recv() => {}

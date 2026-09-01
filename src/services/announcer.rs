@@ -2,7 +2,7 @@ use tokio::net::UdpSocket;
 use std::{ io, net::{ IpAddr, Ipv4Addr, SocketAddr } };
 
 pub async fn start(
-    host_addr: IpAddr,
+    host_target: SocketAddr,
     host_v4: Ipv4Addr,
     hostname: String
 ) -> io::Result<()> {
@@ -15,19 +15,21 @@ pub async fn start(
     ).await?;
     sock.join_multicast_v4(multicast_v4, host_v4).unwrap();
 
-    let mut message = hostname.as_bytes().to_owned();
-    message.insert(0, 1);
+    let message = vec![
+        vec![1],
+        host_target.port().to_be_bytes().to_vec(),
+        hostname.as_bytes().to_owned()
+    ].concat();
 
+    let mut buf = [0; 1];
     loop {
-        let mut buf = [0; 1];
-
-        let receiver = if let Ok(result) = sock.recv_from(&mut buf).await {
-            result
+        let client = if let Ok((1, client)) = sock.recv_from(&mut buf).await {
+            client
         } else {
             continue;
         };
 
-        if receiver.1.ip() != host_addr && buf[0] == 0 {
+        if client.ip() != host_target.ip() && buf[0] == 0 {
             sock.send_to(&message, multicast_target).await?;
         }
     }
