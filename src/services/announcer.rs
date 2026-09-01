@@ -13,7 +13,7 @@ pub async fn start(
     let sock = UdpSocket::bind(
         SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 45783)
     ).await?;
-    sock.join_multicast_v4(multicast_v4, host_v4).unwrap();
+    sock.join_multicast_v4(multicast_v4, host_v4)?;
 
     let message = vec![
         vec![1],
@@ -23,10 +23,11 @@ pub async fn start(
 
     let mut buf = [0; 1];
     loop {
-        let client = if let Ok((1, client)) = sock.recv_from(&mut buf).await {
-            client
-        } else {
-            continue;
+        let client = match sock.recv_from(&mut buf).await {
+            Ok((1, client)) => client,
+            _ => {
+                continue;
+            }
         };
 
         if client.ip() != host_target.ip() && buf[0] == 0 {

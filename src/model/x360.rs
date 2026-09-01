@@ -232,12 +232,9 @@ impl Controller {
                 break;
             }
 
-            match vibration {
-                None => {}
-                Some(vibration) => {
-                    if vibration_tx.send(vibration).await.is_err() {
-                        break;
-                    }
+            if let Some(vibration) = vibration {
+                if vibration_tx.send(vibration).await.is_err() {
+                    break;
                 }
             }
 
