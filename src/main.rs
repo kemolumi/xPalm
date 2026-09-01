@@ -1,6 +1,7 @@
 mod services;
 pub mod consts;
 pub mod model;
+pub mod utils;
 
 use std::{
     net::{ IpAddr, Ipv4Addr, SocketAddr },

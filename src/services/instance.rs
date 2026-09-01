@@ -1,18 +1,30 @@
 use colored::Colorize;
 use tokio::{
     io::{ AsyncReadExt, AsyncWriteExt },
-    net::{ TcpListener, TcpStream, tcp::{ OwnedReadHalf, OwnedWriteHalf } },
+    net::{
+        TcpListener,
+        TcpStream,
+        UdpSocket,
+        tcp::{ OwnedReadHalf, OwnedWriteHalf },
+    },
     sync::{ Mutex, mpsc },
 };
 use std::{ collections::HashMap, io, net::{ IpAddr, SocketAddr }, sync::Arc };
 
-use crate::{ ServerArgs, model::x360 };
+use crate::{
+    ServerArgs,
+    model::x360,
+    utils::udp_joystick::{ UdpJoystick, JoystickStream },
+};
 
 pub async fn launch(
     host_target: SocketAddr,
     server_args: ServerArgs
 ) -> io::Result<()> {
     let sock = TcpListener::bind(host_target).await.unwrap();
+    let joystick_controller = UdpJoystick::new(
+        UdpSocket::bind(host_target).await.unwrap()
+    );
 
     let mut period: HashMap<IpAddr, tokio::time::Instant> = HashMap::new();
 
@@ -44,13 +56,16 @@ pub async fn launch(
         }
 
         period.insert(client.1.ip(), tokio::time::Instant::now());
-        tokio::spawn(client_bootstrap(client, server_args));
+        tokio::spawn(
+            client_bootstrap(client, server_args, joystick_controller.clone())
+        );
     }
 }
 
 async fn client_bootstrap(
     (mut stream, addr): (TcpStream, SocketAddr),
-    server_args: ServerArgs
+    server_args: ServerArgs,
+    joystick_controller: UdpJoystick
 ) {
     let code: u16 = rand::random_range(1454..=9999);
     println!(
@@ -78,7 +93,9 @@ async fn client_bootstrap(
         }
     }
 
-    client_controller(addr.ip(), stream, server_args).await;
+    let joystick_stream = joystick_controller.tune(addr).await;
+
+    client_controller(addr.ip(), stream, joystick_stream, server_args).await;
 }
 
 async fn authorize_client(
@@ -148,6 +165,7 @@ async fn authorize_client(
 async fn client_controller(
     ip: IpAddr,
     stream: TcpStream,
+    joystick_stream: JoystickStream,
     server_args: ServerArgs
 ) {
     let (reader, writer) = stream.into_split();
@@ -174,6 +192,7 @@ async fn client_controller(
     tokio::select! {
         _ = vibration_handler(vibration_tx, writer.clone()) => {}
         _ = controller_buttons_handler(reader, writer, controller.clone(), switch_tx) => {}
+        _ = udp_joystick_handler(joystick_stream, controller) => {}
         _ = a_fucking_deadman_switch_why_not(switch_rx, server_args) => {}
     }
 
@@ -291,6 +310,32 @@ async fn controller_buttons_handler(
                 }
             }
             _ => {}
+        }
+    }
+}
+
+async fn udp_joystick_handler(
+    mut joystick_stream: JoystickStream,
+    controller: Arc<x360::Controller>
+) {
+    let mut joystick_instruction = [0u8; 6];
+    while let Some(6) = joystick_stream.read(&mut joystick_instruction).await {
+        if joystick_instruction[0] != 5 {
+            continue;
+        }
+        match x360::ControllerJoystick::from_repr(joystick_instruction[1]) {
+            Some(joystick) => {
+                controller.joystick(
+                    joystick,
+                    i16::from_be_bytes(
+                        joystick_instruction[2..4].try_into().unwrap()
+                    ),
+                    i16::from_be_bytes(
+                        joystick_instruction[4..6].try_into().unwrap()
+                    )
+                ).await;
+            }
+            None => {}
         }
     }
 }
