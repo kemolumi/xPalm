@@ -19,27 +19,27 @@ use crate::services::{ announcer, instance, local_ip };
 #[command(version, about, long_about = None)]
 struct ConsoleArgs {
     /// Host for xPalm. Default: 0.0.0.0
-    #[arg(short, long)]
+    #[arg(long)]
     host: Option<IpAddr>,
 
     /// Port for xPalm. Default: 45784
-    #[arg(short, long)]
+    #[arg(long)]
     port: Option<u16>,
 
     /// Polling rate (hz) for xPalm controllers to fetch and emit information. Default: 125 - min/max: 1/1000
-    #[arg(short, long)]
+    #[arg(long)]
     polling_rate: Option<u64>,
 
     /// How long to wait (ms) for xPalm client to enter authorization code. Default: 30000
-    #[arg(short, long)]
+    #[arg(long)]
     authorization_period: Option<u64>,
 
     /// Throttle connection request from a client (ms) after an initial. Default: 10000
-    #[arg(short, long)]
+    #[arg(long)]
     connect_cooldown: Option<u64>,
 
     /// Idle time (ms) for xPalm to kick client. Default: 3000
-    #[arg(short, long)]
+    #[arg(long)]
     idle_kick: Option<u64>,
 }
 
