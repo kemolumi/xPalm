@@ -18,7 +18,11 @@ use crate::services::{ announcer, instance, local_ip };
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct ConsoleArgs {
-    /// Port for xPalm. Default: 45784.
+    /// Host for xPalm. Default: 0.0.0.0
+    #[arg(short, long)]
+    host: Option<IpAddr>,
+
+    /// Port for xPalm. Default: 45784
     #[arg(short, long)]
     port: Option<u16>,
 
@@ -41,6 +45,7 @@ struct ConsoleArgs {
 
 #[derive(Clone, Copy)]
 struct ServerArgs {
+    host: Option<IpAddr>,
     port: u16,
     polling_rate: Duration,
     authorization_period: Duration,
@@ -51,6 +56,7 @@ struct ServerArgs {
 impl ServerArgs {
     fn from_console(args: ConsoleArgs) -> Self {
         ServerArgs {
+            host: args.host,
             port: args.port.unwrap_or(45784),
             polling_rate: Duration::from_millis(
                 1000 / args.polling_rate.unwrap_or(125)
@@ -94,20 +100,31 @@ async fn main() {
         tokio::task::JoinHandle<Result<(), std::io::Error>>
     > = None;
 
-    let mut current_ip = ip_receiver.recv().await.unwrap();
+    let mut local_ip = ip_receiver.recv().await.unwrap();
 
     loop {
+        let server_ip = match server_args.host {
+            Some(host) => host,
+            None => "0.0.0.0".parse::<IpAddr>().unwrap(),
+        };
+
+        let host_v4 = Ipv4Addr::from_str(&local_ip).unwrap();
+        let host_target = SocketAddr::new(server_ip, server_args.port);
+
         println!(
-            "{} Binding instance on IP Address: {}",
+            "{} xPalm launched on: {}",
             ">".green(),
-            current_ip.bright_cyan()
+            host_target.to_string().bright_cyan()
         );
-        println!(
-            "{} Manual connect information | IP: {} | Port: {}",
-            ">".green(),
-            current_ip.bright_cyan(),
-            server_args.port.to_string().bright_cyan()
-        );
+
+        if server_ip != IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)) {
+            println!(
+                "{} Manual connection via local network | IP: {} | Port: {}",
+                ">".green(),
+                local_ip.bright_cyan(),
+                server_args.port.to_string().bright_cyan()
+            );
+        }
 
         if let Some(task) = announcer_task {
             task.abort();
@@ -115,11 +132,6 @@ async fn main() {
         if let Some(task) = instance_task {
             task.abort();
         }
-
-        let host_v4 = Ipv4Addr::from_str(&current_ip).unwrap();
-        let host_addr = IpAddr::V4(host_v4);
-
-        let host_target = SocketAddr::new(host_addr, server_args.port);
 
         announcer_task = Some(
             tokio::spawn(
@@ -135,6 +147,6 @@ async fn main() {
             tokio::spawn(instance::launch(host_target, server_args))
         );
 
-        current_ip = ip_receiver.recv().await.unwrap();
+        local_ip = ip_receiver.recv().await.unwrap();
     }
 }
