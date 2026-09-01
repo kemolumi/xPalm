@@ -4,7 +4,13 @@ use tokio::{
     net::{ TcpListener, TcpStream, tcp::{ OwnedReadHalf, OwnedWriteHalf } },
     sync::{ Mutex, mpsc },
 };
-use std::{ collections::HashMap, io, net::{ IpAddr, SocketAddr }, sync::Arc };
+use std::{
+    collections::HashMap,
+    io,
+    net::{ IpAddr, SocketAddr },
+    sync::Arc,
+    time::Duration,
+};
 
 use crate::{
     consts::{ CODE_PERIOD, CONNECT_COOLDOWN, POLLING_RATE },
@@ -158,12 +164,13 @@ async fn client_controller(ip: IpAddr, stream: TcpStream) {
     };
 
     let controller = Arc::new(controller);
-
     let writer = Arc::new(Mutex::new(writer));
+    let (switch_tx, switch_rx) = mpsc::channel(1);
 
     tokio::select! {
         _ = vibration_handler(vibration_tx, writer.clone()) => {}
-        _ = controller_buttons_handler(reader, writer, controller.clone()) => {}
+        _ = controller_buttons_handler(reader, writer, controller.clone(), switch_tx) => {}
+        _ = a_fucking_deadman_switch_why_not(switch_rx) => {}
     }
 
     println!("{} {} disconnected.", ">".red(), ip.to_string().bright_cyan());
@@ -189,7 +196,8 @@ async fn vibration_handler(
 async fn controller_buttons_handler(
     mut reader: OwnedReadHalf,
     writer: Arc<Mutex<OwnedWriteHalf>>,
-    controller: Arc<x360::Controller>
+    controller: Arc<x360::Controller>,
+    switch_tx: mpsc::Sender<()>
 ) {
     let mut flag = [0u8; 1];
     let mut action = [0u8; 2];
@@ -268,6 +276,9 @@ async fn controller_buttons_handler(
                 }
             }
             6 => {
+                if switch_tx.send(()).await.is_err() {
+                    break;
+                }
                 match writer.lock().await.write(&[6]).await {
                     Ok(1) => {}
                     _ => {
@@ -276,6 +287,17 @@ async fn controller_buttons_handler(
                 }
             }
             _ => {}
+        }
+    }
+}
+
+async fn a_fucking_deadman_switch_why_not(mut switch_rx: mpsc::Receiver<()>) {
+    loop {
+        tokio::select! {
+            _ = tokio::time::sleep(Duration::from_secs(5)) => {
+                break;
+            }
+            _ = switch_rx.recv() => {}
         }
     }
 }
