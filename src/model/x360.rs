@@ -95,10 +95,8 @@ pub enum ControllerJoystick {
 impl ControllerJoystick {
     pub fn key_code(self) -> (AbsoluteAxisCode, AbsoluteAxisCode) {
         match self {
-            Self::Left =>
-                (AbsoluteAxisCode::ABS_X, AbsoluteAxisCode::ABS_Y),
-            Self::Right =>
-                (AbsoluteAxisCode::ABS_RX, AbsoluteAxisCode::ABS_RY),
+            Self::Left => (AbsoluteAxisCode::ABS_X, AbsoluteAxisCode::ABS_Y),
+            Self::Right => (AbsoluteAxisCode::ABS_RX, AbsoluteAxisCode::ABS_RY),
         }
     }
 }
@@ -199,38 +197,31 @@ impl Controller {
 
             tokio::select! {
                 event = stream.next_event() => {
-                    let ev = event.unwrap();
-                    match ev.destructure() {
-                        EventSummary::UInput(uinput_event, _, _) => {
-                            match uinput_event.code() {
-                                evdev::UInputCode::UI_FF_UPLOAD => {
-                                    let mut upload = stream
-                                        .device_mut()
-                                        .process_ff_upload(uinput_event)
-                                        .unwrap();
-                                    upload.set_retval(0);
+                    if let EventSummary::UInput(uinput_event, _, _) = event.unwrap().destructure() {
+                        match uinput_event.code() {
+                            evdev::UInputCode::UI_FF_UPLOAD => {
+                                let mut upload = stream
+                                    .device_mut()
+                                    .process_ff_upload(uinput_event)
+                                    .unwrap();
+                                upload.set_retval(0);
 
-                                    let effect = upload.effect();
+                                let effect = upload.effect();
 
-                                    match effect.kind {
-                                        FFEffectKind::Rumble { strong_magnitude, weak_magnitude } => {
-                                            let average = (strong_magnitude as f32 + weak_magnitude as f32) / 2.0;
-                                            vibration = Some(((average / 65535.0 * 255.0) as u8, effect.replay.length / 5));
-                                        }
-                                        _ => {}
-                                    }
+                                if let FFEffectKind::Rumble { strong_magnitude, weak_magnitude } = effect.kind {
+                                    let average = (strong_magnitude as f32 + weak_magnitude as f32) / 2.0;
+                                    vibration = Some(((average / 65535.0 * 255.0) as u8, effect.replay.length / 5));
                                 }
-                                evdev::UInputCode::UI_FF_ERASE => {
-                                    let mut erase = stream
-                                        .device_mut()
-                                        .process_ff_erase(uinput_event)
-                                        .unwrap();
-                                    erase.set_retval(0);
-                                }
-                                _ => {}
                             }
+                            evdev::UInputCode::UI_FF_ERASE => {
+                                let mut erase = stream
+                                    .device_mut()
+                                    .process_ff_erase(uinput_event)
+                                    .unwrap();
+                                erase.set_retval(0);
+                            }
+                            _ => {}
                         }
-                        _ => {}
                     }
                     interval.tick().await;
                 }
@@ -252,15 +243,10 @@ impl Controller {
 
             let count = button_batch_rx.len();
 
-            match count {
-                0 => {}
-                count => {
-                    let mut events: Vec<InputEvent> = Vec::with_capacity(
-                        button_batch_rx.len()
-                    );
-                    button_batch_rx.recv_many(&mut events, count).await;
-                    stream.device_mut().emit(&events).unwrap();
-                }
+            if count != 0 {
+                let mut events: Vec<InputEvent> = Vec::with_capacity(count);
+                button_batch_rx.recv_many(&mut events, count).await;
+                stream.device_mut().emit(&events).unwrap();
             }
         }
     }
